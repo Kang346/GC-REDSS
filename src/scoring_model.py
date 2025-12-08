@@ -100,7 +100,8 @@ class ScoringModel:
         mode_speeds = {
             "driving": 50,
             "walking": 5,
-            "transit": 30
+            "transit": 30,
+            "biking": 15  # Average urban cycling speed
         }
         
         # Check if property is within any commute circle
@@ -111,18 +112,22 @@ class ScoringModel:
             else:
                 # Calculate accurate geodesic distance to circle boundary
                 point_geom = Point(property_lon, property_lat)
-                distance_degrees = circle.boundary.distance(point_geom)
                 
                 # Find nearest point on circle boundary for accurate distance calculation
                 try:
-                    # Get representative point on circle boundary
-                    boundary_point = circle.boundary.interpolate(0.5)  # Midpoint
-                    boundary_coords = (boundary_point.y, boundary_point.x)  # lat, lon
+                    # Get the actual nearest point on the boundary (more accurate than midpoint)
+                    # Project the point onto the boundary to find closest point
+                    nearest_point_on_boundary = circle.boundary.interpolate(
+                        circle.boundary.project(point_geom)
+                    )
+                    boundary_coords = (nearest_point_on_boundary.y, nearest_point_on_boundary.x)  # lat, lon
                     
                     # Calculate accurate geodesic distance in kilometers
                     distance_km = geodesic(property_point, boundary_coords).kilometers
                 except:
-                    # Fallback: approximate conversion (1 degree ≈ 111km at equator)
+                    # Fallback: use Shapely distance (in degrees) and convert
+                    distance_degrees = circle.boundary.distance(point_geom)
+                    # Approximate conversion (1 degree ≈ 111km at equator)
                     distance_km = distance_degrees * 111
                 
                 # Calculate time penalty based on transport mode speed
@@ -172,19 +177,22 @@ class ScoringModel:
         if self.geo_calculator.check_point_in_circle(property_point, life_circle):
             return 1.0
         else:
-            # Calculate accurate geodesic distance
+            # Calculate accurate geodesic distance to circle boundary
             point_geom = Point(property_lon, property_lat)
-            distance_degrees = life_circle.boundary.distance(point_geom)
             
             try:
-                # Get representative point on circle boundary
-                boundary_point = life_circle.boundary.interpolate(0.5)
-                boundary_coords = (boundary_point.y, boundary_point.x)
+                # Get the actual nearest point on the boundary (more accurate than midpoint)
+                nearest_point_on_boundary = life_circle.boundary.interpolate(
+                    life_circle.boundary.project(point_geom)
+                )
+                boundary_coords = (nearest_point_on_boundary.y, nearest_point_on_boundary.x)
                 
                 # Calculate accurate geodesic distance in kilometers
                 distance_km = geodesic(property_point, boundary_coords).kilometers
             except:
-                # Fallback: approximate conversion
+                # Fallback: use Shapely distance (in degrees) and convert
+                distance_degrees = life_circle.boundary.distance(point_geom)
+                # Approximate conversion (1 degree ≈ 111km at equator)
                 distance_km = distance_degrees * 111
             
             # Walking speed: ~5 km/h
