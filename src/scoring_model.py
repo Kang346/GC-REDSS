@@ -80,6 +80,7 @@ class ScoringModel:
                                commute_threshold: float) -> float:
         """
         Calculate commute accessibility score using elastic filtering
+        Score gradually decreases from 1.0 to near 0 as distance increases
         
         Args:
             property_lat: Property latitude
@@ -90,7 +91,17 @@ class ScoringModel:
         Returns:
             Commute score between 0 and 1
         """
+        from shapely.geometry import Point
+        from geopy.distance import geodesic
+        
         property_point = (property_lat, property_lon)
+        
+        # Transport mode speeds (km/h)
+        mode_speeds = {
+            "driving": 50,
+            "walking": 5,
+            "transit": 30
+        }
         
         # Check if property is within any commute circle
         in_circle_scores = []
@@ -98,24 +109,43 @@ class ScoringModel:
             if self.geo_calculator.check_point_in_circle(property_point, circle):
                 in_circle_scores.append(1.0)
             else:
-                # Elastic filtering: calculate distance to circle boundary
-                from shapely.geometry import Point
+                # Calculate accurate geodesic distance to circle boundary
                 point_geom = Point(property_lon, property_lat)
-                distance_to_boundary = circle.boundary.distance(point_geom)
+                distance_degrees = circle.boundary.distance(point_geom)
                 
-                # Convert distance to approximate time penalty
-                # Rough conversion: 1 degree ≈ 111km, assume average speed
-                distance_km = distance_to_boundary * 111
-                time_penalty = distance_km / 50 * 60  # Assume 50 km/h, convert to minutes
+                # Find nearest point on circle boundary for accurate distance calculation
+                try:
+                    # Get representative point on circle boundary
+                    boundary_point = circle.boundary.interpolate(0.5)  # Midpoint
+                    boundary_coords = (boundary_point.y, boundary_point.x)  # lat, lon
+                    
+                    # Calculate accurate geodesic distance in kilometers
+                    distance_km = geodesic(property_point, boundary_coords).kilometers
+                except:
+                    # Fallback: approximate conversion (1 degree ≈ 111km at equator)
+                    distance_km = distance_degrees * 111
                 
-                # Elastic score: exponential decay outside circle
-                # Score = 1.0 if inside, decays to 0 as distance increases
-                penalty_factor = time_penalty / commute_threshold
-                score = np.exp(-penalty_factor * 2)  # Exponential decay
+                # Calculate time penalty based on transport mode speed
+                speed_kmh = mode_speeds.get(mode, 30)
+                time_penalty_minutes = (distance_km / speed_kmh) * 60
+                
+                # Improved elastic filtering: smooth gradual decay
+                # Use a combination of exponential and inverse functions for smoother decay
+                penalty_factor = time_penalty_minutes / commute_threshold
+                
+                # Smooth decay function: starts at 1.0, gradually decreases
+                # Formula: 1 / (1 + penalty_factor^1.5) for smoother curve
+                # This ensures gradual decrease, never suddenly becomes 0
+                score = 1.0 / (1.0 + penalty_factor ** 1.5)
+                
+                # Ensure score doesn't go below a small threshold (e.g., 0.01)
+                # This prevents complete zero scores for very far properties
+                score = max(0.01, score)
+                
                 in_circle_scores.append(score)
         
         # Return maximum score across all transport modes
-        return max(in_circle_scores) if in_circle_scores else 0.0
+        return max(in_circle_scores) if in_circle_scores else 0.01
     
     def calculate_life_score(self,
                             property_lat: float,
@@ -123,7 +153,7 @@ class ScoringModel:
                             life_circle: any,
                             life_threshold: float) -> float:
         """
-        Calculate life accessibility score
+        Calculate life accessibility score with smooth gradual decay
         
         Args:
             property_lat: Property latitude
@@ -134,24 +164,38 @@ class ScoringModel:
         Returns:
             Life accessibility score between 0 and 1
         """
+        from shapely.geometry import Point
+        from geopy.distance import geodesic
+        
         property_point = (property_lat, property_lon)
         
         if self.geo_calculator.check_point_in_circle(property_point, life_circle):
             return 1.0
         else:
-            # Elastic filtering for life circle
-            from shapely.geometry import Point
+            # Calculate accurate geodesic distance
             point_geom = Point(property_lon, property_lat)
-            distance_to_boundary = life_circle.boundary.distance(point_geom)
+            distance_degrees = life_circle.boundary.distance(point_geom)
+            
+            try:
+                # Get representative point on circle boundary
+                boundary_point = life_circle.boundary.interpolate(0.5)
+                boundary_coords = (boundary_point.y, boundary_point.x)
+                
+                # Calculate accurate geodesic distance in kilometers
+                distance_km = geodesic(property_point, boundary_coords).kilometers
+            except:
+                # Fallback: approximate conversion
+                distance_km = distance_degrees * 111
             
             # Walking speed: ~5 km/h
-            distance_km = distance_to_boundary * 111
-            time_penalty = distance_km / 5 * 60  # Convert to minutes
+            time_penalty_minutes = (distance_km / 5) * 60
             
-            penalty_factor = time_penalty / life_threshold
-            score = np.exp(-penalty_factor * 2)
+            # Smooth gradual decay
+            penalty_factor = time_penalty_minutes / life_threshold
+            score = 1.0 / (1.0 + penalty_factor ** 1.5)
             
-            return max(0.0, score)
+            # Ensure minimum score
+            return max(0.01, score)
     
     def score_properties(self,
                         properties_df: DataFrame,
