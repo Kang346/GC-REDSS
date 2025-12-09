@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Polygon, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { usePropertyStore } from '../store/propertyStore'
-import { propertyApi } from '../services/api'
 import 'leaflet/dist/leaflet.css'
 
 // Fix for default marker icons in React-Leaflet
@@ -50,7 +49,6 @@ const MapBounds: React.FC<{ properties: any[] }> = ({ properties }) => {
 const MapView: React.FC = () => {
   const { 
     properties, 
-    selectedProperty, 
     setSelectedProperty, 
     searchParams,
     commuteCircles,

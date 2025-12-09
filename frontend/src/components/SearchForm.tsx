@@ -13,12 +13,17 @@ const SearchForm: React.FC = () => {
 
   useEffect(() => {
     // Load default config
-    propertyApi.getConfig().then((config) => {
-      if (config.default_weights) {
-        setWeights(config.default_weights)
-        form.setFieldsValue({ weights: config.default_weights })
-      }
-    })
+    propertyApi.getConfig()
+      .then((config) => {
+        if (config.default_weights) {
+          setWeights(config.default_weights)
+          form.setFieldsValue({ weights: config.default_weights })
+        }
+      })
+      .catch((error) => {
+        // Silently fail if API is not available, use default weights
+        console.warn('Failed to load config, using defaults:', error)
+      })
   }, [form])
 
   const onFinish = async (values: any) => {
@@ -50,8 +55,18 @@ const SearchForm: React.FC = () => {
         setWorkLocation(response.work_location)
       }
     } catch (error: any) {
-      setError(error.response?.data?.error || 'Failed to fetch properties')
-      console.error('Error:', error)
+      let errorMessage = 'Failed to fetch properties'
+      
+      if (error.code === 'ECONNREFUSED' || error.message?.includes('Network Error')) {
+        errorMessage = `Cannot connect to API server. Please ensure the backend API is running on ${import.meta.env.VITE_API_URL || 'http://localhost:5001'}. Check the browser console for details.`
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+      
+      setError(errorMessage)
+      console.error('Search Error:', error)
     } finally {
       setLoading(false)
     }

@@ -1,12 +1,12 @@
 import React from 'react'
-import { List, Card, Typography, Tag, Empty } from 'antd'
+import { List, Card, Typography, Tag, Empty, Alert } from 'antd'
 import { usePropertyStore } from '../store/propertyStore'
 import { Property } from '../types'
 
 const { Text, Title } = Typography
 
 const PropertyList: React.FC = () => {
-  const { properties, selectedProperty, setSelectedProperty, loading } = usePropertyStore()
+  const { properties, selectedProperty, setSelectedProperty, loading, error } = usePropertyStore()
 
   const getScoreColor = (score: number) => {
     if (score >= 0.8) return 'green'
@@ -16,6 +16,21 @@ const PropertyList: React.FC = () => {
 
   if (loading) {
     return <Card><Text>Loading properties...</Text></Card>
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <Alert
+          message="Error"
+          description={error}
+          type="error"
+          showIcon
+          closable
+          onClose={() => usePropertyStore.getState().setError(null)}
+        />
+      </Card>
+    )
   }
 
   if (properties.length === 0) {
@@ -80,4 +95,6 @@ const PropertyList: React.FC = () => {
 }
 
 export default PropertyList
+
+
 
