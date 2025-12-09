@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Button, Slider, Card, Space, Typography, Divider } from 'antd'
+import { Form, Input, Button, Slider, Card, Divider, Checkbox, InputNumber, Row, Col } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { propertyApi } from '../services/api'
 import { usePropertyStore, defaultWeights } from '../store/propertyStore'
 import { SearchParams } from '../types'
 
-const { Title } = Typography
-
 const SearchForm: React.FC = () => {
   const [form] = Form.useForm()
-  const { setProperties, setLoading, setError, setSearchParams, loading } = usePropertyStore()
+  const { setProperties, setLoading, setError, setSearchParams, setCommuteCircles, setWorkLocation, loading } = usePropertyStore()
   const [weights, setWeights] = useState(defaultWeights)
+  const [transportModes, setTransportModes] = useState<string[]>(['driving'])
 
   useEffect(() => {
     // Load default config
@@ -30,9 +29,11 @@ const SearchForm: React.FC = () => {
       work_address: values.work_address,
       commute_threshold: values.commute_threshold || 30,
       life_threshold: values.life_threshold || 15,
-      top_n: values.top_n || 20,
+      top_n: values.top_n || 50,
+      price_min: values.price_min,
+      price_max: values.price_max,
       fast_mode: true,  // Enable fast mode for quick response (~1-2 seconds)
-      transport_modes: ['driving'],  // Default to driving only for speed
+      transport_modes: transportModes.length ? transportModes : ['driving'],
       weights: weights,
     }
 
@@ -40,6 +41,14 @@ const SearchForm: React.FC = () => {
       const response = await propertyApi.scoreProperties(params)
       setProperties(response.properties)
       setSearchParams(params)
+      
+      // Store commute circles and work location for map display
+      if (response.commute_circles) {
+        setCommuteCircles(response.commute_circles)
+      }
+      if (response.work_location) {
+        setWorkLocation(response.work_location)
+      }
     } catch (error: any) {
       setError(error.response?.data?.error || 'Failed to fetch properties')
       console.error('Error:', error)
@@ -64,7 +73,8 @@ const SearchForm: React.FC = () => {
           work_address: 'Times Square, New York, NY',
           commute_threshold: 30,
           life_threshold: 15,
-          top_n: 20,
+          top_n: 50,
+          transport_modes: ['driving'],
           weights: defaultWeights,
         }}
       >
@@ -85,7 +95,55 @@ const SearchForm: React.FC = () => {
         </Form.Item>
 
         <Form.Item label="Number of Results" name="top_n">
-          <Slider min={10} max={50} marks={{ 10: '10', 20: '20', 50: '50' }} />
+          <Slider min={10} max={100} marks={{ 10: '10', 50: '50', 100: '100' }} />
+        </Form.Item>
+
+        <Divider>Price Filter</Divider>
+
+        <Form.Item label="Price Range ($)">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="price_min" noStyle>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  placeholder="Min Price"
+                  min={0}
+                  formatter={(value) => value ? `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                  parser={(value) => {
+                    const parsed = value?.replace(/\$\s?|(,*)/g, '') || ''
+                    return parsed ? (parseFloat(parsed) as any) : undefined
+                  }}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="price_max" noStyle>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  placeholder="Max Price"
+                  min={0}
+                  formatter={(value) => value ? `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                  parser={(value) => {
+                    const parsed = value?.replace(/\$\s?|(,*)/g, '') || ''
+                    return parsed ? (parseFloat(parsed) as any) : undefined
+                  }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form.Item>
+
+        <Form.Item label="Transport Modes" name="transport_modes">
+          <Checkbox.Group
+            options={[
+              { label: 'Driving', value: 'driving' },
+              { label: 'Walking', value: 'walking' },
+              { label: 'Transit', value: 'transit' },
+              { label: 'Biking', value: 'biking' },
+            ]}
+            value={transportModes}
+            onChange={(vals) => setTransportModes(vals as string[])}
+          />
         </Form.Item>
 
         <Divider>Scoring Weights</Divider>

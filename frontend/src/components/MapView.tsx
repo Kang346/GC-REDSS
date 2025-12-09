@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polygon, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { usePropertyStore } from '../store/propertyStore'
 import { propertyApi } from '../services/api'
@@ -48,37 +48,35 @@ const MapBounds: React.FC<{ properties: any[] }> = ({ properties }) => {
 }
 
 const MapView: React.FC = () => {
-  const { properties, selectedProperty, setSelectedProperty, searchParams } = usePropertyStore()
-  const [workLocation, setWorkLocation] = useState<[number, number] | null>(null)
+  const { 
+    properties, 
+    selectedProperty, 
+    setSelectedProperty, 
+    searchParams,
+    commuteCircles,
+    workLocation: storeWorkLocation
+  } = usePropertyStore()
   
   // NYC center coordinates
   const nycCenter: [number, number] = [40.7128, -74.0060]
-
-  // Geocode work address when search params change
-  useEffect(() => {
-    if (searchParams && searchParams.work_address) {
-      propertyApi.geocodeAddress(searchParams.work_address)
-        .then((result) => {
-          setWorkLocation([result.latitude, result.longitude])
-        })
-        .catch((error) => {
-          console.error('Geocoding error:', error)
-          setWorkLocation(null)
-        })
-    } else {
-      setWorkLocation(null)
-    }
-  }, [searchParams])
+  
+  // Use work location from store, or fallback to geocoding
+  const workLocation: [number, number] | null = storeWorkLocation 
+    ? [storeWorkLocation.latitude, storeWorkLocation.longitude]
+    : null
 
   const handleMarkerClick = (property: any) => {
     setSelectedProperty(property)
   }
 
-  // Estimate radius in meters (rough conversion: 30 min commute ≈ 25km at 50km/h average)
-  const getCommuteRadius = (minutes: number) => {
-    // Rough estimate: 50 km/h average speed
-    const km = (minutes / 60) * 50
-    return km * 1000 // Convert to meters
+  // Convert GeoJSON coordinates to Leaflet format [lat, lon][]
+  const convertGeoJsonToLeaflet = (coords: number[][][]): [number, number][] => {
+    // GeoJSON format: [[[lon, lat], ...]]
+    // Leaflet format: [[lat, lon], ...]
+    if (coords && coords.length > 0 && coords[0].length > 0) {
+      return coords[0].map((coord: number[]) => [coord[1], coord[0]] as [number, number])
+    }
+    return []
   }
 
   return (
@@ -100,24 +98,55 @@ const MapView: React.FC = () => {
               <strong>📍 Work Location</strong>
               <br />
               {searchParams?.work_address}
+              {searchParams?.commute_threshold && (
+                <>
+                  <br />
+                  <small>Commute threshold: {searchParams.commute_threshold} minutes</small>
+                </>
+              )}
             </div>
           </Popup>
         </Marker>
       )}
       
-      {/* Show commute circle if work address is provided */}
-      {workLocation && searchParams && (
-        <Circle
-          center={workLocation}
-          radius={getCommuteRadius(searchParams.commute_threshold)}
-          pathOptions={{
-            color: '#3388ff',
-            fillColor: '#3388ff',
-            fillOpacity: 0.15,
-            weight: 2,
-          }}
-        />
-      )}
+      {/* Show commute circles (polygons) from API response */}
+      {commuteCircles && Object.entries(commuteCircles).map(([mode, circle]) => {
+        const positions = convertGeoJsonToLeaflet(circle.coordinates)
+        if (positions.length === 0) return null
+        
+        // Color coding for different transport modes
+        const modeColors: { [key: string]: { color: string; fillColor: string } } = {
+          driving: { color: '#3388ff', fillColor: '#3388ff' },
+          walking: { color: '#52c41a', fillColor: '#52c41a' },
+          transit: { color: '#fa8c16', fillColor: '#fa8c16' },
+          biking: { color: '#eb2f96', fillColor: '#eb2f96' },
+        }
+        
+        const colors = modeColors[mode] || { color: '#3388ff', fillColor: '#3388ff' }
+        
+        return (
+          <Polygon
+            key={mode}
+            positions={positions}
+            pathOptions={{
+              color: colors.color,
+              fillColor: colors.fillColor,
+              fillOpacity: 0.15,
+              weight: 2,
+            }}
+          >
+            <Popup>
+              <div>
+                <strong>{mode.charAt(0).toUpperCase() + mode.slice(1)} Commute Zone</strong>
+                <br />
+                <small>
+                  {searchParams?.commute_threshold} minutes from {searchParams?.work_address}
+                </small>
+              </div>
+            </Popup>
+          </Polygon>
+        )
+      })}
       
       {/* Property markers */}
       {properties.map((property, index) => (

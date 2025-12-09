@@ -24,6 +24,8 @@ export interface SearchParams {
   commute_threshold: number
   life_threshold: number
   top_n: number
+  price_min?: number  // Minimum price filter
+  price_max?: number  // Maximum price filter
   fast_mode?: boolean  // Enable fast mode for quick response (~1-2 seconds)
   transport_modes?: string[]  // Transport modes to consider (default: ['driving'])
   weights: {
@@ -36,9 +38,23 @@ export interface SearchParams {
   }
 }
 
+export interface CommuteCircle {
+  type: 'Polygon'
+  coordinates: number[][][]  // GeoJSON format: [[[lon, lat], ...]]
+}
+
 export interface ApiResponse {
   status: string
   count: number
   properties: Property[]
+  work_location?: {
+    latitude: number
+    longitude: number
+  }
+  commute_circles?: {
+    [mode: string]: CommuteCircle
+  }
+  commute_threshold?: number
+  transport_modes?: string[]
 }
 

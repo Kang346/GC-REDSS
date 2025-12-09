@@ -79,6 +79,8 @@ def score_properties():
         commute_threshold = data.get('commute_threshold', 30)
         life_threshold = data.get('life_threshold', 15)
         top_n = data.get('top_n', 20)
+        price_min = data.get('price_min')
+        price_max = data.get('price_max')
         custom_weights = data.get('weights')
         fast_mode = data.get('fast_mode', True)  # Default to fast mode for better UX
         transport_modes = data.get('transport_modes', ['driving'])  # Default to driving only for speed
@@ -86,10 +88,23 @@ def score_properties():
         if not work_address:
             return jsonify({"error": "work_address is required"}), 400
         
-        logger.info(f"Scoring request: work_address={work_address}, fast_mode={fast_mode}")
+        logger.info(f"Scoring request: work_address={work_address}, fast_mode={fast_mode}, price_range=[{price_min}, {price_max}]")
         
         # Load processed data
         properties_df = processor.get_processed_data()
+        
+        # Apply price filter if provided
+        from pyspark.sql.functions import col
+        if price_min is not None:
+            properties_df = properties_df.filter(col("PRICE") >= price_min)
+            logger.info(f"Applied price_min filter: ${price_min:,.0f}")
+        if price_max is not None:
+            properties_df = properties_df.filter(col("PRICE") <= price_max)
+            logger.info(f"Applied price_max filter: ${price_max:,.0f}")
+        
+        if price_min is not None or price_max is not None:
+            filtered_count = properties_df.count()
+            logger.info(f"After price filtering: {filtered_count} properties remain")
         
         # Use custom weights if provided
         if custom_weights:
@@ -97,6 +112,23 @@ def score_properties():
             scoring_model._normalize_weights()
         
         # Score properties with fast mode enabled
+        # We need to get the commute circles for the response
+        # So we'll calculate them first, then use them for scoring
+        from src.geo_circle import GeoCircleCalculator
+        geo_calculator = GeoCircleCalculator()
+        
+        # Calculate commute circles (will be used for scoring and returned to frontend)
+        commute_circles = geo_calculator.calculate_commute_circle(
+            work_address,
+            commute_threshold,
+            transport_modes,
+            fast_mode=fast_mode
+        )
+        
+        # Get work location for response
+        work_location = geo_calculator.geocode_address(work_address)
+        
+        # Score properties (this will use cached circles if available)
         scored_df = scoring_model.score_properties(
             properties_df,
             work_address=work_address,
@@ -114,10 +146,36 @@ def score_properties():
         # Convert to JSON-serializable format
         results = top_properties_pd.to_dict('records')
         
+        # Convert commute circles to GeoJSON format for frontend
+        commute_circles_geojson = {}
+        for mode, polygon in commute_circles.items():
+            if polygon is not None:
+                # Convert Shapely Polygon to GeoJSON coordinates
+                # GeoJSON uses [lon, lat] format, and exterior coordinates
+                coords = []
+                if hasattr(polygon, 'exterior'):
+                    for point in polygon.exterior.coords:
+                        coords.append([point[0], point[1]])  # [lon, lat]
+                else:
+                    # Fallback for simple polygons
+                    coords = [[point[0], point[1]] for point in polygon.boundary.coords]
+                
+                commute_circles_geojson[mode] = {
+                    "type": "Polygon",
+                    "coordinates": [coords]  # GeoJSON format: array of coordinate rings
+                }
+        
         return jsonify({
             "status": "success",
             "count": len(results),
-            "properties": results
+            "properties": results,
+            "work_location": {
+                "latitude": work_location[0],
+                "longitude": work_location[1]
+            },
+            "commute_circles": commute_circles_geojson,
+            "commute_threshold": commute_threshold,
+            "transport_modes": transport_modes
         })
         
     except Exception as e:
