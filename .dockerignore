@@ -32,6 +32,11 @@ spark-warehouse/
 metastore_db/
 derby.log
 
+# node build files
+node_modules
+frontend/node_modules
+**/node_modules
+
 # Data files (keep structure but ignore large files)
 data/raw/*.csv
 data/processed/*.parquet
