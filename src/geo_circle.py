@@ -81,12 +81,18 @@ class GeoCircleCalculator:
         
         try:
             logger.info(f"Downloading {network_type} road network for {center_point} (mode: {transport_mode})")
+            logger.info(f"  This may take 1-3 minutes depending on network size and internet speed...")
+            # Force output flush to show progress immediately
+            import sys
+            sys.stdout.flush()
             G = ox.graph_from_point(
                 center_point,
                 dist=distance,
                 network_type=network_type,
                 simplify=True
             )
+            logger.info(f"  ✓ Network download completed, processing...")
+            sys.stdout.flush()
             
             # Add edge travel times based on speed limits and road types
             # Only add speeds/times for drivable networks
@@ -160,6 +166,9 @@ class GeoCircleCalculator:
             # Calculate maximum travel time in seconds
             max_time_seconds = travel_time_minutes * 60
             
+            logger.info(f"Calculating shortest paths from center node (this may take 30-60 seconds)...")
+            import sys
+            sys.stdout.flush()
             # OPTIMIZED: Use batch shortest path algorithm (Dijkstra) instead of iterating all nodes
             # This calculates all shortest paths from center_node at once, much faster than looping
             travel_times = {}
@@ -283,7 +292,8 @@ class GeoCircleCalculator:
     def calculate_commute_circle(self,
                                 work_address: str,
                                 commute_threshold_minutes: float,
-                                transport_modes: List[str] = None) -> Dict[str, Polygon]:
+                                transport_modes: List[str] = None,
+                                fast_mode: bool = False) -> Dict[str, Polygon]:
         """
         Calculate commute circles for different transport modes
         Each mode uses its own specific road network
@@ -301,17 +311,53 @@ class GeoCircleCalculator:
         
         logger.info(f"Calculating commute circles for {work_address} with modes: {transport_modes}")
         work_location = self.geocode_address(work_address)
+        logger.info(f"✓ Work location geocoded: {work_location}")
         
         commute_circles = {}
-        for mode in transport_modes:
-            logger.info(f"Calculating {mode} isochrone with {mode}-specific network...")
-            isochrone = self.calculate_isochrone(
-                work_location,
-                commute_threshold_minutes,
-                transport_mode=mode
-            )
-            commute_circles[mode] = isochrone
-            logger.info(f"{mode.capitalize()} commute circle calculated successfully")
+        
+        # FAST MODE: Use simplified circular buffers (much faster, ~1-2 seconds)
+        if fast_mode:
+            logger.info("⚡ FAST MODE: Using simplified circular buffers (response time: ~1-2 seconds)")
+            for mode in transport_modes:
+                commute_circles[mode] = self._create_circular_buffer(
+                    work_location,
+                    commute_threshold_minutes,
+                    mode
+                )
+            logger.info("✓ Fast mode circles calculated")
+            return commute_circles
+        
+        # FULL MODE: Use full road network calculation (slower, but more accurate)
+        logger.info("=" * 80)
+        logger.info("⚠️  FULL MODE: Downloading road network data from OpenStreetMap")
+        logger.info("   - This may take 3-5 minutes (downloading network data)")
+        logger.info("   - Subsequent runs will be faster (using cached data)")
+        logger.info("=" * 80)
+        
+        total_modes = len(transport_modes)
+        logger.info(f"\n📊 Processing {total_modes} transport mode(s)...")
+        for idx, mode in enumerate(transport_modes, 1):
+            logger.info(f"\n[{idx}/{total_modes}] 🚗 Processing {mode.upper()} mode...")
+            logger.info(f"   Step {idx}.1: Downloading {mode} road network...")
+            logger.info(f"   Step {idx}.2: Calculating shortest paths...")
+            logger.info(f"   Step {idx}.3: Generating isochrone polygon...")
+            try:
+                isochrone = self.calculate_isochrone(
+                    work_location,
+                    commute_threshold_minutes,
+                    transport_mode=mode
+                )
+                commute_circles[mode] = isochrone
+                logger.info(f"   ✓ {mode.capitalize()} commute circle calculated successfully!")
+            except Exception as e:
+                logger.error(f"   ✗ Error calculating {mode} circle: {e}")
+                logger.warning(f"   Using fallback for {mode} mode")
+                commute_circles[mode] = self._create_circular_buffer(
+                    work_location,
+                    commute_threshold_minutes,
+                    mode
+                )
+        logger.info(f"\n✅ All commute circles calculated!")
         
         return commute_circles
     

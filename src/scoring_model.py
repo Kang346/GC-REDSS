@@ -11,6 +11,7 @@ import logging
 
 from src.config import DEFAULT_SCORING_WEIGHTS
 from src.geo_circle import GeoCircleCalculator
+from src.geo_circle_cache import GeoCircleCache
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class ScoringModel:
         self.weights = weights or DEFAULT_SCORING_WEIGHTS.copy()
         self._normalize_weights()
         self.geo_calculator = GeoCircleCalculator()
+        self.cache = GeoCircleCache()
         logger.info(f"ScoringModel initialized with weights: {self.weights}")
     
     def _normalize_weights(self):
@@ -134,18 +136,22 @@ class ScoringModel:
                 speed_kmh = mode_speeds.get(mode, 30)
                 time_penalty_minutes = (distance_km / speed_kmh) * 60
                 
-                # Improved elastic filtering: smooth gradual decay
-                # Use a combination of exponential and inverse functions for smoother decay
+                # IMPROVED elastic filtering: much more flexible boundary
+                # Allow properties even 2x beyond threshold to still have decent scores
+                # This addresses user feedback: "Even slightly beyond 15 minutes should be reachable"
+                
                 penalty_factor = time_penalty_minutes / commute_threshold
                 
-                # Smooth decay function: starts at 1.0, gradually decreases
-                # Formula: 1 / (1 + penalty_factor^1.5) for smoother curve
-                # This ensures gradual decrease, never suddenly becomes 0
-                score = 1.0 / (1.0 + penalty_factor ** 1.5)
+                # More lenient decay: properties up to 2x threshold still get reasonable scores
+                # Formula: 1 / (1 + penalty_factor^1.2) - gentler decay
+                # For penalty_factor = 1.0 (exactly at threshold): score ≈ 0.45
+                # For penalty_factor = 2.0 (2x threshold): score ≈ 0.30
+                # This ensures properties just outside circle still appear in results
+                score = 1.0 / (1.0 + penalty_factor ** 1.2)
                 
-                # Ensure score doesn't go below a small threshold (e.g., 0.01)
-                # This prevents complete zero scores for very far properties
-                score = max(0.01, score)
+                # Ensure minimum score is higher (0.05 instead of 0.01)
+                # This ensures even far properties have some visibility
+                score = max(0.05, score)
                 
                 in_circle_scores.append(score)
         
@@ -198,19 +204,21 @@ class ScoringModel:
             # Walking speed: ~5 km/h
             time_penalty_minutes = (distance_km / 5) * 60
             
-            # Smooth gradual decay
+            # IMPROVED: More flexible boundary for life accessibility
+            # Allow properties even 2x beyond threshold to still have decent scores
             penalty_factor = time_penalty_minutes / life_threshold
-            score = 1.0 / (1.0 + penalty_factor ** 1.5)
+            score = 1.0 / (1.0 + penalty_factor ** 1.2)  # Gentler decay
             
-            # Ensure minimum score
-            return max(0.01, score)
+            # Ensure minimum score is higher
+            return max(0.05, score)
     
     def score_properties(self,
                         properties_df: DataFrame,
                         work_address: str,
                         commute_threshold_minutes: float,
                         life_threshold_minutes: float = 15,
-                        transport_modes: List[str] = None) -> DataFrame:
+                        transport_modes: List[str] = None,
+                        fast_mode: bool = True) -> DataFrame:
         """
         Calculate comprehensive S scores for all properties
         
@@ -220,30 +228,67 @@ class ScoringModel:
             commute_threshold_minutes: Maximum acceptable commute time
             life_threshold_minutes: Maximum acceptable walking time to amenities
             transport_modes: List of transport modes to consider
+            fast_mode: If True, use cached circles or simplified calculation (faster)
             
         Returns:
             DataFrame with additional score columns
         """
         logger.info("Calculating scores for properties...")
         
-        # Calculate commute circles
-        commute_circles = self.geo_calculator.calculate_commute_circle(
-            work_address,
-            commute_threshold_minutes,
-            transport_modes
-        )
+        if transport_modes is None:
+            transport_modes = ["driving"]  # Default to driving only for faster response
         
-        # For life circle, we'll use a representative property location
-        # In practice, you might want to calculate this per property or use a centroid
-        sample_property = properties_df.select("LATITUDE", "LONGITUDE").first()
-        if sample_property:
-            life_center = f"{sample_property['LATITUDE']},{sample_property['LONGITUDE']}"
-            life_circle = self.geo_calculator.calculate_life_circle(
-                life_center,
-                life_threshold_minutes
+        # Try to get cached circles first (fast mode)
+        commute_circles = None
+        life_circle = None
+        
+        if fast_mode:
+            cached = self.cache.get_cached_circles(
+                work_address, commute_threshold_minutes, 
+                life_threshold_minutes, transport_modes
             )
-        else:
-            life_circle = None
+            if cached:
+                logger.info("Using cached geo-circles (fast mode)")
+                commute_circles = cached['commute_circles']
+                life_circle = cached['life_circle']
+        
+        # If not cached, calculate circles
+        if commute_circles is None:
+            if fast_mode:
+                logger.info("⚡ FAST MODE: Using simplified calculation (~1-2 seconds)")
+            else:
+                logger.info("Calculating new geo-circles (this may take 3-5 minutes)...")
+            
+            commute_circles = self.geo_calculator.calculate_commute_circle(
+                work_address,
+                commute_threshold_minutes,
+                transport_modes,
+                fast_mode=fast_mode
+            )
+            
+            # For life circle, use work address as center (more logical)
+            work_location = self.geo_calculator.geocode_address(work_address)
+            if fast_mode:
+                # Fast mode: use circular buffer
+                life_circle = self.geo_calculator._create_circular_buffer(
+                    work_location,
+                    life_threshold_minutes,
+                    "walking"
+                )
+            else:
+                life_center = f"{work_location[0]},{work_location[1]}"
+                life_circle = self.geo_calculator.calculate_life_circle(
+                    life_center,
+                    life_threshold_minutes
+                )
+            
+            # Save to cache for next time (only if not fast mode, to avoid caching simplified circles)
+            if not fast_mode:
+                self.cache.save_circles(
+                    work_address, commute_threshold_minutes,
+                    life_threshold_minutes, transport_modes,
+                    commute_circles, life_circle
+                )
         
         # Convert Spark DataFrame to Pandas for easier processing
         # (For large datasets, you'd want to use Spark UDFs instead)
