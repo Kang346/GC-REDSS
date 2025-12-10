@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  gc-redss:
+    build: .
+    container_name: gc-redss-container
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/home/jovyan/work
+      - ./data:/home/jovyan/work/data
+      - ./output:/home/jovyan/work/output
+      - ./cache:/home/jovyan/work/cache
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - SPARK_LOCAL_IP=0.0.0.0
+    networks:
+      - gc-redss-network
+
+networks:
+  gc-redss-network:
+    driver: bridge
