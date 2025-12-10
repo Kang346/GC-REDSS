@@ -34,7 +34,7 @@ const createScoreIcon = (score: number) => {
 // Component to fit map bounds to markers
 const MapBounds: React.FC<{ properties: any[] }> = ({ properties }) => {
   const map = useMap()
-  
+
   useEffect(() => {
     if (properties.length > 0) {
       const bounds = L.latLngBounds(
@@ -43,20 +43,20 @@ const MapBounds: React.FC<{ properties: any[] }> = ({ properties }) => {
       map.fitBounds(bounds, { padding: [50, 50] })
     }
   }, [properties, map])
-  
+
   return null
 }
 
 // Component to handle map clicks for work location selection
 const MapClickHandler: React.FC = () => {
   const { mapClickMode, setPendingWorkLocation, setMapClickMode } = usePropertyStore()
-  
+
   useMapEvents({
     click: async (e) => {
       if (mapClickMode) {
         const { lat, lng } = e.latlng
         setPendingWorkLocation({ latitude: lat, longitude: lng })
-        
+
         // Try to reverse geocode to get address
         try {
           // Use a reverse geocoding service (Nominatim)
@@ -64,12 +64,13 @@ const MapClickHandler: React.FC = () => {
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
             {
               headers: {
-                'User-Agent': 'GC-REDSS/1.0'
+                'User-Agent': 'GC-REDSS/1.0',
+                'Accept-Language': 'en'
               }
             }
           )
           const data = await response.json()
-          
+
           if (data.display_name) {
             // Update the form with the address (we'll handle this in SearchForm)
             const address = data.display_name
@@ -85,36 +86,36 @@ const MapClickHandler: React.FC = () => {
             detail: { address: `${lat.toFixed(6)}, ${lng.toFixed(6)}`, latitude: lat, longitude: lng }
           }))
         }
-        
+
         // Disable click mode after selection
         setMapClickMode(false)
       }
     }
   })
-  
+
   return null
 }
 
 const MapView: React.FC = () => {
-  const { 
-    properties, 
-    setSelectedProperty, 
+  const {
+    properties,
+    setSelectedProperty,
     searchParams,
     commuteCircles,
     workLocation: storeWorkLocation,
     mapClickMode,
     pendingWorkLocation
   } = usePropertyStore()
-  
+
   // NYC center coordinates
   const nycCenter: [number, number] = [40.7128, -74.0060]
-  
+
   // Use work location from store, or pending location, or fallback to geocoding
-  const workLocation: [number, number] | null = storeWorkLocation 
+  const workLocation: [number, number] | null = storeWorkLocation
     ? [storeWorkLocation.latitude, storeWorkLocation.longitude]
     : pendingWorkLocation
-    ? [pendingWorkLocation.latitude, pendingWorkLocation.longitude]
-    : null
+      ? [pendingWorkLocation.latitude, pendingWorkLocation.longitude]
+      : null
 
   const handleMarkerClick = (property: any) => {
     setSelectedProperty(property)
@@ -140,10 +141,10 @@ const MapView: React.FC = () => {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      
+
       {/* Map click handler for work location selection */}
       <MapClickHandler />
-      
+
       {/* Show visual indicator when in click mode */}
       {mapClickMode && (
         <div style={{
@@ -164,10 +165,10 @@ const MapView: React.FC = () => {
           🗺️ Click on the map to select work location
         </div>
       )}
-      
+
       {/* Show work location marker */}
       {workLocation && (
-        <Marker 
+        <Marker
           position={workLocation}
           icon={L.icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
@@ -191,10 +192,10 @@ const MapView: React.FC = () => {
           </Popup>
         </Marker>
       )}
-      
+
       {/* Show pending work location marker (when clicking on map) */}
       {pendingWorkLocation && !storeWorkLocation && (
-        <Marker 
+        <Marker
           position={[pendingWorkLocation.latitude, pendingWorkLocation.longitude]}
           icon={L.icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
@@ -212,7 +213,7 @@ const MapView: React.FC = () => {
           </Popup>
         </Marker>
       )}
-      
+
       {/* Show commute circles (polygons) from API response */}
       {commuteCircles && Object.entries(commuteCircles).map(([mode, circle]) => {
         // Defensive check: ensure circle and coordinates exist
@@ -221,7 +222,7 @@ const MapView: React.FC = () => {
         }
         const positions = convertGeoJsonToLeaflet(circle.coordinates)
         if (!positions || positions.length === 0) return null
-        
+
         // Color coding for different transport modes
         const modeColors: { [key: string]: { color: string; fillColor: string } } = {
           driving: { color: '#3388ff', fillColor: '#3388ff' },
@@ -230,9 +231,9 @@ const MapView: React.FC = () => {
           biking: { color: '#eb2f96', fillColor: '#eb2f96' },
           subway: { color: '#722ed1', fillColor: '#722ed1' }, // Purple for subway
         }
-        
+
         const colors = modeColors[mode] || { color: '#3388ff', fillColor: '#3388ff' }
-        
+
         return (
           <Polygon
             key={mode}
@@ -256,7 +257,7 @@ const MapView: React.FC = () => {
           </Polygon>
         )
       })}
-      
+
       {/* Property markers */}
       {properties.map((property, index) => (
         <Marker
@@ -288,7 +289,7 @@ const MapView: React.FC = () => {
           </Popup>
         </Marker>
       ))}
-      
+
       {/* Fit bounds to all properties */}
       <MapBounds properties={properties} />
     </MapContainer>

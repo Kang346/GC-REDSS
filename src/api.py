@@ -327,10 +327,10 @@ if __name__ == '__main__':
                 return False
     
     # Try to find an available port (try 5000, 5001, 5002, 5003, 5004)
-    preferred_port = int(os.environ.get('FLASK_PORT', 5000))
+    preferred_port = int(os.environ.get('FLASK_PORT', 5001))
     port = None
     
-    for test_port in [preferred_port, 5001, 5002, 5003, 5004, 5005]:
+    for test_port in [preferred_port, 5000, 5002, 5003, 5004, 5005]:
         if is_port_available(test_port):
             port = test_port
             if test_port != preferred_port:

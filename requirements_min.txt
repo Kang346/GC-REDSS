@@ -1,0 +1,12 @@
+# 最小化依赖 - 仅运行 API 所需
+pyspark==3.5.0
+pandas==2.1.4
+numpy==1.26.2
+pyarrow>=4.0.0
+geopandas==0.14.1
+shapely==2.0.2
+osmnx==1.7.0
+networkx==3.2.1
+geopy==2.4.1
+flask==3.0.0
+flask-cors==4.0.0
