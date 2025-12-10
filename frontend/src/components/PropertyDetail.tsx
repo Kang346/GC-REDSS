@@ -1,7 +1,7 @@
 import React from 'react'
 import { Card, Typography, Descriptions, Tag, Divider } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
-import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts'
+import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts'
 import { usePropertyStore } from '../store/propertyStore'
 import { Property } from '../types'
 
@@ -154,4 +154,6 @@ const PropertyDetail: React.FC<PropertyDetailProps> = ({ property }) => {
 }
 
 export default PropertyDetail
+
+
 
