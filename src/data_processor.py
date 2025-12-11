@@ -39,18 +39,45 @@ class DataProcessor:
         
         logger.info("DataProcessor initialized")
     
-    def load_raw_data(self, file_path: str = None) -> 'DataFrame':
+    def load_raw_data(self, file_path: str = None, auto_download: bool = False) -> 'DataFrame':
         """
         Load raw CSV data
         
         Args:
             file_path: Path to CSV file. If None, uses default path.
+            auto_download: If True and file doesn't exist, attempt to download from Kaggle.
             
         Returns:
             Spark DataFrame with raw data
         """
         if file_path is None:
             file_path = str(RAW_DATA_DIR / "NY-House-Dataset.csv")
+        
+        # Check if file exists, optionally download if missing
+        if not Path(file_path).exists():
+            if auto_download:
+                logger.info(f"Data file not found at {file_path}. Attempting to download...")
+                try:
+                    import importlib.util
+                    project_root = Path(__file__).parent.parent
+                    download_script = project_root / "scripts" / "download_data.py"
+                    spec = importlib.util.spec_from_file_location("download_data", download_script)
+                    download_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(download_module)
+                    file_path = download_module.download_kaggle_dataset()
+                except Exception as e:
+                    logger.error(f"Auto-download failed: {e}")
+                    logger.error("Please run: python scripts/download_data.py")
+                    raise FileNotFoundError(
+                        f"Data file not found at {file_path}. "
+                        "Run 'python scripts/download_data.py' to download the dataset."
+                    )
+            else:
+                raise FileNotFoundError(
+                    f"Data file not found at {file_path}. "
+                    "Run 'python scripts/download_data.py' to download the dataset, "
+                    "or set auto_download=True to download automatically."
+                )
         
         logger.info(f"Loading data from {file_path}")
         df = self.spark.read.csv(

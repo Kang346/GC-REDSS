@@ -61,3 +61,6 @@ Thumbs.db
 
 # Cache
 cache/
+
+# my local venv
+bigdata_venv/

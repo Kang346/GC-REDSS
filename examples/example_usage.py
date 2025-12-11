@@ -2,10 +2,20 @@
 Example usage of GC-REDSS system
 """
 import sys
+import logging
 from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Configure logging to show INFO level messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 from pyspark.sql import SparkSession
 from src.data_processor import DataProcessor
@@ -39,8 +49,23 @@ try:
     print("Work address: Times Square, New York, NY")
     print(f"Commute threshold: {DEFAULT_COMMUTE_THRESHOLD} minutes")
     print(f"Life threshold: {DEFAULT_LIFE_THRESHOLD} minutes")
+    print(f"Transport modes: {', '.join(DEFAULT_TRANSPORT_MODES)}")
+    print("\n" + "⚠️  IMPORTANT: This step will download road network data from OpenStreetMap")
+    print("   - First run may take 3-5 minutes (downloading network data)")
+    print("   - Subsequent runs will be faster (using cached data)")
+    print("   - Please be patient, downloading in progress...")
+    print("-" * 80)
     
     scoring_model = ScoringModel(weights=DEFAULT_SCORING_WEIGHTS)
+    
+    print("\n🔄 Starting score calculation...")
+    print("   Step 2.1: Downloading road network data (this may take 1-3 minutes)...")
+    print("   Step 2.2: Calculating commute circles for each transport mode...")
+    print("   Step 2.3: Calculating property scores...")
+    print()
+    print("📡 Now downloading road network data - please wait...")
+    print("   (You'll see detailed progress messages below)")
+    print("-" * 80)
     
     scored_df = scoring_model.score_properties(
         properties_df,
@@ -49,6 +74,8 @@ try:
         life_threshold_minutes=DEFAULT_LIFE_THRESHOLD,
         transport_modes=DEFAULT_TRANSPORT_MODES
     )
+    
+    print("\n✅ Score calculation completed!")
     
     # Step 3: Display results
     print("\n[Step 3] Top 10 properties by S Score:")
