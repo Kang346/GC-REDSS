@@ -1,13 +1,25 @@
 import React, { useState, useEffect } from 'react'
-import { Form, Input, Button, Slider, Card, Divider, Checkbox, InputNumber, Row, Col } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
+import { Form, Input, Button, Slider, Card, Divider, Checkbox, InputNumber, Row, Col, Space } from 'antd'
+import { SearchOutlined, EnvironmentOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { propertyApi } from '../services/api'
 import { usePropertyStore, defaultWeights } from '../store/propertyStore'
 import { SearchParams } from '../types'
 
 const SearchForm: React.FC = () => {
   const [form] = Form.useForm()
-  const { setProperties, setLoading, setError, setSearchParams, setCommuteCircles, setWorkLocation, loading } = usePropertyStore()
+  const { 
+    setProperties, 
+    setLoading, 
+    setError, 
+    setSearchParams, 
+    setCommuteCircles, 
+    setWorkLocation, 
+    loading,
+    mapClickMode,
+    setMapClickMode,
+    pendingWorkLocation,
+    setPendingWorkLocation
+  } = usePropertyStore()
   const [weights, setWeights] = useState(defaultWeights)
   const [transportModes, setTransportModes] = useState<string[]>(['driving'])
 
@@ -24,7 +36,20 @@ const SearchForm: React.FC = () => {
         // Silently fail if API is not available, use default weights
         console.warn('Failed to load config, using defaults:', error)
       })
-  }, [form])
+    
+    // Listen for map location selection
+    const handleMapLocationSelected = (event: CustomEvent) => {
+      const { address, latitude, longitude } = event.detail
+      form.setFieldsValue({ work_address: address })
+      setPendingWorkLocation({ latitude, longitude })
+    }
+    
+    window.addEventListener('mapLocationSelected', handleMapLocationSelected as EventListener)
+    
+    return () => {
+      window.removeEventListener('mapLocationSelected', handleMapLocationSelected as EventListener)
+    }
+  }, [form, setPendingWorkLocation])
 
   const onFinish = async (values: any) => {
     setLoading(true)
@@ -44,21 +69,34 @@ const SearchForm: React.FC = () => {
 
     try {
       const response = await propertyApi.scoreProperties(params)
-      setProperties(response.properties)
+      
+      // Defensive check: ensure properties array exists
+      if (response && response.properties) {
+        setProperties(Array.isArray(response.properties) ? response.properties : [])
+      } else {
+        setProperties([])
+      }
+      
       setSearchParams(params)
       
       // Store commute circles and work location for map display
-      if (response.commute_circles) {
+      if (response && response.commute_circles) {
         setCommuteCircles(response.commute_circles)
+      } else {
+        setCommuteCircles(null)
       }
-      if (response.work_location) {
+      if (response && response.work_location) {
         setWorkLocation(response.work_location)
+      } else {
+        setWorkLocation(null)
       }
     } catch (error: any) {
       let errorMessage = 'Failed to fetch properties'
       
       if (error.code === 'ECONNREFUSED' || error.message?.includes('Network Error')) {
         errorMessage = `Cannot connect to API server. Please ensure the backend API is running on ${import.meta.env.VITE_API_URL || 'http://localhost:5001'}. Check the browser console for details.`
+      } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMessage = `Request timed out. The calculation is taking longer than expected. This may happen for new locations. Please try: 1) Reducing commute threshold, 2) Selecting only one transport mode, or 3) Waiting a bit longer and trying again.`
       } else if (error.response?.data?.error) {
         errorMessage = error.response.data.error
       } else if (error.message) {
@@ -98,7 +136,59 @@ const SearchForm: React.FC = () => {
           name="work_address"
           rules={[{ required: true, message: 'Please enter work address' }]}
         >
-          <Input placeholder="e.g., Times Square, New York, NY" />
+          <Space.Compact style={{ width: '100%' }}>
+            <Input 
+              placeholder="e.g., Times Square, New York, NY" 
+              style={{ flex: 1 }}
+            />
+            <Button
+              type={mapClickMode ? "primary" : "default"}
+              icon={<EnvironmentOutlined />}
+              onClick={() => setMapClickMode(!mapClickMode)}
+              danger={mapClickMode}
+            >
+              {mapClickMode ? 'Cancel' : 'Pick on Map'}
+            </Button>
+          </Space.Compact>
+          {pendingWorkLocation && (
+            <div style={{ marginTop: 8 }}>
+              <Space>
+                <span style={{ fontSize: '12px', color: '#666' }}>
+                  📍 Location selected: {pendingWorkLocation.latitude.toFixed(6)}, {pendingWorkLocation.longitude.toFixed(6)}
+                </span>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<CheckOutlined />}
+                  onClick={() => {
+                    // Use the pending location
+                    setWorkLocation(pendingWorkLocation)
+                    setPendingWorkLocation(null)
+                    setMapClickMode(false)
+                  }}
+                >
+                  Use This Location
+                </Button>
+                <Button
+                  size="small"
+                  icon={<CloseOutlined />}
+                  onClick={() => {
+                    setPendingWorkLocation(null)
+                    setMapClickMode(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+              </Space>
+            </div>
+          )}
+          {mapClickMode && (
+            <div style={{ marginTop: 4 }}>
+              <small style={{ color: '#1890ff' }}>
+                💡 Click anywhere on the map to select work location
+              </small>
+            </div>
+          )}
         </Form.Item>
 
         <Form.Item label="Commute Threshold (minutes)" name="commute_threshold">
@@ -155,6 +245,7 @@ const SearchForm: React.FC = () => {
               { label: 'Walking', value: 'walking' },
               { label: 'Transit', value: 'transit' },
               { label: 'Biking', value: 'biking' },
+              { label: 'Subway', value: 'subway' },
             ]}
             value={transportModes}
             onChange={(vals) => setTransportModes(vals as string[])}

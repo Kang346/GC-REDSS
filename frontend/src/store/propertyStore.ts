@@ -9,6 +9,8 @@ interface PropertyState {
   searchParams: SearchParams | null
   commuteCircles: { [mode: string]: CommuteCircle } | null
   workLocation: { latitude: number; longitude: number } | null
+  mapClickMode: boolean  // Whether map is in "click to select work location" mode
+  pendingWorkLocation: { latitude: number; longitude: number } | null  // Temporary location from map click
   
   setProperties: (properties: Property[]) => void
   setSelectedProperty: (property: Property | null) => void
@@ -17,6 +19,8 @@ interface PropertyState {
   setSearchParams: (params: SearchParams | null) => void
   setCommuteCircles: (circles: { [mode: string]: CommuteCircle } | null) => void
   setWorkLocation: (location: { latitude: number; longitude: number } | null) => void
+  setMapClickMode: (enabled: boolean) => void
+  setPendingWorkLocation: (location: { latitude: number; longitude: number } | null) => void
 }
 
 const defaultWeights = {
@@ -36,6 +40,8 @@ export const usePropertyStore = create<PropertyState>((set) => ({
   searchParams: null,
   commuteCircles: null,
   workLocation: null,
+  mapClickMode: false,
+  pendingWorkLocation: null,
 
   setProperties: (properties) => set({ properties }),
   setSelectedProperty: (property) => set({ selectedProperty: property }),
@@ -44,6 +50,8 @@ export const usePropertyStore = create<PropertyState>((set) => ({
   setSearchParams: (params) => set({ searchParams: params }),
   setCommuteCircles: (circles) => set({ commuteCircles: circles }),
   setWorkLocation: (location) => set({ workLocation: location }),
+  setMapClickMode: (enabled) => set({ mapClickMode: enabled }),
+  setPendingWorkLocation: (location) => set({ pendingWorkLocation: location }),
 }))
 
 export { defaultWeights }

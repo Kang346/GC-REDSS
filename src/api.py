@@ -38,12 +38,32 @@ def init_spark():
         spark = SparkSession.builder \
             .appName(SPARK_CONFIG["spark.app.name"]) \
             .config("spark.sql.warehouse.dir", SPARK_CONFIG["spark.sql.warehouse.dir"]) \
+            .config("spark.driver.memory", SPARK_CONFIG.get("spark.driver.memory", "4g")) \
+            .config("spark.executor.memory", SPARK_CONFIG.get("spark.executor.memory", "4g")) \
+            .config("spark.sql.execution.arrow.pyspark.enabled", "true") \
+            .config("spark.sql.execution.arrow.pyspark.fallback.enabled", "true") \
+            .config("spark.sql.adaptive.enabled", "true") \
+            .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
             .getOrCreate()
+        
+        # Keep Spark session alive - prevent auto-shutdown
+        spark.sparkContext.setLogLevel("WARN")  # Reduce log noise
         
         processor = DataProcessor(spark)
         scoring_model = ScoringModel(weights=DEFAULT_SCORING_WEIGHTS)
         
         logger.info("Spark session and models initialized")
+        logger.info(f"Spark session ID: {spark.sparkContext.applicationId}")
+    
+    # Verify Spark session is still active
+    try:
+        # Check if SparkContext is still valid
+        _ = spark.sparkContext.version  # This will raise exception if context is closed
+    except Exception as e:
+        logger.warning(f"Spark session appears to be closed ({e})")
+        logger.warning("Note: 'Closing down clientserver connection' is normal Py4j cleanup, not a shutdown")
+        logger.warning("If requests fail, the session will be reinitialized automatically on next request")
+        # Don't reinitialize here to avoid recursion - let it happen on next request
 
 
 @app.route('/health', methods=['GET'])
@@ -71,7 +91,21 @@ def score_properties():
     }
     """
     try:
+        # Ensure Spark session is initialized and active
         init_spark()
+        
+        # Verify Spark session is still active before processing
+        try:
+            if spark is None:
+                raise ValueError("Spark session is None")
+            _ = spark.sparkContext.version  # Verify context is active
+        except Exception as e:
+            logger.error(f"Spark session is not available ({e}), attempting to reinitialize...")
+            init_spark()  # Try to reinitialize
+            try:
+                _ = spark.sparkContext.version  # Verify again
+            except:
+                return jsonify({"error": "Spark session unavailable, please restart the server"}), 500
         
         data = request.get_json()
         
@@ -117,16 +151,20 @@ def score_properties():
         from src.geo_circle import GeoCircleCalculator
         geo_calculator = GeoCircleCalculator()
         
+        # IMPORTANT: Geocode work address FIRST to ensure consistency
+        # This ensures the circles are calculated from the exact same location
+        logger.info(f"Geocoding work address: {work_address}")
+        work_location = geo_calculator.geocode_address(work_address)
+        logger.info(f"✓ Work location geocoded: {work_location[0]:.6f}, {work_location[1]:.6f}")
+        
         # Calculate commute circles (will be used for scoring and returned to frontend)
+        # This uses the geocoded work_location internally, ensuring consistency
         commute_circles = geo_calculator.calculate_commute_circle(
             work_address,
             commute_threshold,
             transport_modes,
             fast_mode=fast_mode
         )
-        
-        # Get work location for response
-        work_location = geo_calculator.geocode_address(work_address)
         
         # Score properties (this will use cached circles if available)
         scored_df = scoring_model.score_properties(
@@ -150,20 +188,26 @@ def score_properties():
         commute_circles_geojson = {}
         for mode, polygon in commute_circles.items():
             if polygon is not None:
-                # Convert Shapely Polygon to GeoJSON coordinates
-                # GeoJSON uses [lon, lat] format, and exterior coordinates
-                coords = []
-                if hasattr(polygon, 'exterior'):
-                    for point in polygon.exterior.coords:
-                        coords.append([point[0], point[1]])  # [lon, lat]
-                else:
-                    # Fallback for simple polygons
-                    coords = [[point[0], point[1]] for point in polygon.boundary.coords]
-                
-                commute_circles_geojson[mode] = {
-                    "type": "Polygon",
-                    "coordinates": [coords]  # GeoJSON format: array of coordinate rings
-                }
+                try:
+                    # Convert Shapely Polygon to GeoJSON coordinates
+                    # GeoJSON uses [lon, lat] format, and exterior coordinates
+                    coords = []
+                    if hasattr(polygon, 'exterior'):
+                        for point in polygon.exterior.coords:
+                            coords.append([point[0], point[1]])  # [lon, lat]
+                    else:
+                        # Fallback for simple polygons
+                        coords = [[point[0], point[1]] for point in polygon.boundary.coords]
+                    
+                    # Only add if we have valid coordinates
+                    if coords and len(coords) > 0:
+                        commute_circles_geojson[mode] = {
+                            "type": "Polygon",
+                            "coordinates": [coords]  # GeoJSON format: array of coordinate rings
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to convert polygon for {mode}: {e}")
+                    # Skip this mode if conversion fails
         
         return jsonify({
             "status": "success",
@@ -283,10 +327,10 @@ if __name__ == '__main__':
                 return False
     
     # Try to find an available port (try 5000, 5001, 5002, 5003, 5004)
-    preferred_port = int(os.environ.get('FLASK_PORT', 5000))
+    preferred_port = int(os.environ.get('FLASK_PORT', 5001))
     port = None
     
-    for test_port in [preferred_port, 5001, 5002, 5003, 5004, 5005]:
+    for test_port in [preferred_port, 5000, 5002, 5003, 5004, 5005]:
         if is_port_available(test_port):
             port = test_port
             if test_port != preferred_port:
@@ -300,12 +344,20 @@ if __name__ == '__main__':
         sys.exit(1)
     
     logger.info("=" * 80)
-    logger.info(f"🚀 Starting Flask API server on port {port}")
-    logger.info(f"📡 API will be available at: http://localhost:{port}")
-    logger.info(f"❤️  Health check: http://localhost:{port}/health")
-    logger.info(f"🔍 Score endpoint: http://localhost:{port}/api/score")
+    logger.info(f"Starting Flask API server on port {port}")
+    logger.info(f"API will be available at: http://localhost:{port}")
+    logger.info(f"Health check: http://localhost:{port}/health")
+    logger.info(f"Score endpoint: http://localhost:{port}/api/score")
     logger.info("=" * 80)
-    logger.info(f"💡 Note: Update frontend config if using a different port")
+    logger.info(f"Note!!!: Update frontend config if using a different port")
+    logger.info("=" * 80)
+    logger.info("Note!!!: 'Closing down clientserver connection' messages are NORMAL")
     logger.info("=" * 80)
     
-    app.run(host='0.0.0.0', port=port, debug=True)
+    try:
+        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Server error: {e}", exc_info=True)
+        raise

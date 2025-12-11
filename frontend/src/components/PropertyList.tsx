@@ -33,7 +33,7 @@ const PropertyList: React.FC = () => {
     )
   }
 
-  if (properties.length === 0) {
+  if (!properties || properties.length === 0) {
     return (
       <Card>
         <Empty description="No properties found. Search to get started!" />

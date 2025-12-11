@@ -30,7 +30,7 @@ SPARK_CONFIG = {
 # Geo-Circle default settings
 DEFAULT_COMMUTE_THRESHOLD = 30  # minutes
 DEFAULT_LIFE_THRESHOLD = 15  # minutes
-DEFAULT_TRANSPORT_MODES = ["driving", "walking", "transit", "biking"]
+DEFAULT_TRANSPORT_MODES = ["driving", "walking", "transit", "biking", "subway"]
 
 # Scoring model default weights
 DEFAULT_SCORING_WEIGHTS = {

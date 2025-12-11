@@ -26,7 +26,10 @@ class GeoCircleCache:
     def _get_cache_key(self, work_address: str, commute_threshold: float, 
                       life_threshold: float, transport_modes: list) -> str:
         """Generate cache key from parameters"""
-        key_string = f"{work_address}_{commute_threshold}_{life_threshold}_{sorted(transport_modes)}"
+        # Normalize address to avoid cache misses due to formatting differences
+        # Convert to lowercase and strip whitespace for consistent caching
+        normalized_address = work_address.lower().strip()
+        key_string = f"{normalized_address}_{commute_threshold}_{life_threshold}_{sorted(transport_modes)}"
         return hashlib.md5(key_string.encode()).hexdigest()
     
     def get_cached_circles(self, work_address: str, commute_threshold: float,
@@ -65,6 +68,7 @@ class GeoCircleCache:
             logger.info(f"Cached circles saved to {cache_file}")
         except Exception as e:
             logger.warning(f"Error saving cache: {e}")
+
 
 
 
